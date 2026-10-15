@@ -13,12 +13,12 @@ Consulta las **tasas de cauciones** (1D, 2D, 3D y 7D) y su **volumen operado** d
 ### Características principales
 
 - 📊 **Tasas en tiempo real** - Consulta tasas y volumen de 1, 2, 3 y 7 días desde PPI
-- 🔔 **Alertas inteligentes** - Cualquier cambio, umbral porcentual o valor objetivo
+- 🔔 **Alertas inteligentes** - Cualquier cambio, tasa mínima con variación porcentual o valor objetivo
 - 🐦 **Publicación en X/Twitter** - Tuitea automáticamente cuando una tasa sube ≥ 5 puntos porcentuales
 - 🕐 **Horario de mercado** - Respeta el horario del mercado argentino (Lun-Vie 10:30-17:00)
 - 🇦🇷 **Timezone Argentina** - Todas las fechas en hora de Buenos Aires
 - 💾 **Persistencia PostgreSQL** - Tasas, suscripciones y sugerencias en base de datos
-- ⚡ **Verificación cada 60s** - Monitoreo constante durante horario de mercado
+- ⚡ **Verificación configurable** - Monitoreo constante durante horario de mercado (`UPDATE_INTERVAL`, 60 segundos por defecto)
 - 💬 **Sistema de sugerencias** - Los usuarios pueden dejar feedback con `/sugerencia`
 - 🛠️ **Panel de administración** - Estadísticas, estado de la DB y broadcast a suscriptores
 - 🧪 **Modo test** - Bot, token y base de datos separados para desarrollo (`TEST=true`)
@@ -28,7 +28,7 @@ Consulta las **tasas de cauciones** (1D, 2D, 3D y 7D) y su **volumen operado** d
 | Tipo | Descripción | Ideal para |
 |------|-------------|------------|
 | 🔔 **Cualquier cambio** | Notifica cada vez que las tasas varíen | Traders activos |
-| 📊 **Umbral porcentual** | Solo cuando el cambio supere 0.5%, 1%, 2%, 5% o personalizado | Inversores que buscan movimientos significativos |
+| 📊 **Umbral y variación** | Avisa cuando la tasa 1D alcanza el mínimo elegido y luego ante variaciones relativas configurables, mientras permanezca sobre ese mínimo | Inversores que buscan movimientos significativos sobre una tasa determinada |
 | 🎯 **Valor objetivo** | Notifica una única vez cuando la tasa 1D cruza el valor elegido (ej: 25%, 50%) | Quienes esperan un nivel de tasa específico |
 
 ## 📱 Comandos
@@ -70,7 +70,7 @@ Consultar tasas actuales (con volumen) e indicador de cambios
 ### `/configurar`
 Configurar tus preferencias de notificación mediante un menú interactivo:
 - 🔔 Cualquier cambio
-- 📊 Cambio > 0.5%, 1%, 2%, 5% o personalizado
+- 📊 Tasa mínima 1D y variación relativa de 0.5%, 1%, 2%, 5% o personalizada
 - 🎯 Cuando la tasa 1D llegue a un valor objetivo
 
 ### `/estado`
@@ -136,9 +136,12 @@ TELEGRAM_BOT_TOKEN=tu_token_de_telegram
 TELEGRAM_BOT_TOKEN_TEST=tu_token_de_bot_de_test   # usado si TEST=true
 ADMIN_CHAT_ID=tu_chat_id                          # para comandos de admin
 
-# PPI
+# Fuente de tasas
 PPI_PUBLIC_KEY=tu_public_key
 PPI_SECRET_KEY=tu_secret_key
+
+# En modo test  (desde Docker Desktop hacia un Apache local)
+CAUCIONES_URL=una url local que veuelva un json con los rates y volumenes
 
 # Base de datos (PostgreSQL)
 DB_HOST=localhost
@@ -150,6 +153,7 @@ DB_NAME_TEST=cauciones_test                       # usado si TEST=true
 
 # Modo test (separa bot, token y DB de producción)
 TEST=false
+UPDATE_INTERVAL=60                              # segundos entre consultas de tasas
 
 # X/Twitter (opcional)
 TWITTER_ENABLED=false
@@ -182,12 +186,12 @@ APERTURA_MERVAL = time(10, 30)
 CIERRE_MERVAL = time(17, 0)
 ```
 
-### Cambiar intervalo de verificación
+### Intervalo de verificación
 
-En `src/bot.py`, dentro de `_post_init`:
+Configura `UPDATE_INTERVAL` en segundos para elegir cada cuánto se consultan las tasas. El valor predeterminado es `60`:
 
-```python
-application.job_queue.run_repeating(_verificar_tasas_y_notificar, interval=60, first=10)
+```env
+UPDATE_INTERVAL=60
 ```
 
 ### Tolerancia para detección de cambios

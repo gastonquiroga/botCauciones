@@ -48,4 +48,12 @@ CREATE INDEX IF NOT EXISTS idx_suggestions_unread
     ON suggestions (created_at DESC)
     WHERE read = FALSE;
 
+-- adding a new parameter for single subscriptions
+ALTER TABLE subscriptions
+  ADD COLUMN percentage_variation NUMERIC(10, 4) NOT NULL DEFAULT 0;
+
+ALTER TABLE subscriptions
+  ADD CONSTRAINT subscriptions_percentage_variation_check
+  CHECK (percentage_variation >= 0);
+
 COMMIT;

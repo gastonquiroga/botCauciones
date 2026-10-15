@@ -70,7 +70,8 @@ def get_estadisticas_suscripciones() -> dict:
                            SUM(CASE WHEN subscription_type = 'any_change' THEN 1 ELSE 0 END) as cualquier_cambio,
                            SUM(CASE WHEN subscription_type = 'percentage' THEN 1 ELSE 0 END) as porcentaje,
                            SUM(CASE WHEN subscription_type = 'target' THEN 1 ELSE 0 END) as objetivo,
-                           AVG(CASE WHEN subscription_type = 'percentage' THEN threshold_percentage END) as umbral_promedio
+                           AVG(CASE WHEN subscription_type = 'percentage' THEN threshold_percentage END) as umbral_promedio,
+                           AVG(CASE WHEN subscription_type = 'percentage' THEN percentage_variation END) as variacion_promedio
                     FROM subscriptions
                 """)
                 fila = cur.fetchone()
@@ -84,6 +85,7 @@ def get_estadisticas_suscripciones() -> dict:
         'usuarios_porcentaje': fila[2] or 0,
         'usuarios_objetivo': fila[3] or 0,
         'umbral_promedio': round(fila[4] or 0, 2) if fila[4] else 0,
+        'variacion_promedio': round(fila[5] or 0, 2) if fila[5] else 0,
     }
 
 def get_suscripciones() -> dict | None:
@@ -103,7 +105,8 @@ def get_suscripciones() -> dict | None:
                     suscripciones[fila['chat_id']] = {
                         'chat_id': fila['chat_id'],
                         'subscription_type':fila['subscription_type'],
-                        'threshold_percentage' :fila['threshold_percentage']
+                        'threshold_percentage': fila['threshold_percentage'],
+                        'percentage_variation': fila['percentage_variation'],
                     }
 
                 logger.info(f"✅ Cargadas {len(suscripciones)} suscripciones desde PostgreSQL")
@@ -158,16 +161,18 @@ async def set_suscripcion(suscripcion):
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO subscriptions
-                    (chat_id, subscription_type, threshold_percentage, updated_at)
-                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                    (chat_id, subscription_type, threshold_percentage, percentage_variation, updated_at)
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
                     ON CONFLICT (chat_id) DO UPDATE SET
                     subscription_type = EXCLUDED.subscription_type,
                     threshold_percentage = EXCLUDED.threshold_percentage,
+                    percentage_variation = EXCLUDED.percentage_variation,
                     updated_at = CURRENT_TIMESTAMP
                 """, (
                 suscripcion.chat_id,
                 suscripcion.subscription_type.value,
-                suscripcion.threshold_percentage
+                suscripcion.threshold_percentage,
+                suscripcion.percentage_variation,
                 ))
                 conn.commit()
 

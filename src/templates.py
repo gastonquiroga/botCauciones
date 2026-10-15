@@ -8,7 +8,7 @@ def bienvenida() -> str:
         '🔔 *Recibir alertas automáticas*\n'
         'Te notifico cuando las tasas cambien. Podes elegir:\n'
         '  • Cualquier variación\n'
-        '  • Solo cambios importantes (>1%, >2%, etc.)\n'
+        '  • Tasa 1D mínima con variación porcentual\n'
         '  • Cuando la tasa llegue a un valor que elijas (%25, %50, etc)\n'
         '¿Queres empezar? Elegi una opción:'
     )
@@ -21,7 +21,7 @@ def ayuda() -> str:
         "*🔔 Configurar alertas:*\n"
         "/configurar - Elegir cuándo recibir notificaciones:\n"
         "  • Cualquier cambio en las tasas\n"
-        "  • Solo cambios mayores a 0.5%, 1%, 2%, 5%\n"
+        "  • Tasa 1D mínima con variaciones de 0.5%, 1%, 2% o 5%\n"
         '  • Cuando la tasa llegue a un valor que elijas (%25, %50, etc)\n'
         "  • Umbral personalizado\n\n"
         "*📱 Gestionar alertas:*\n"
@@ -30,11 +30,11 @@ def ayuda() -> str:
         "*💬 Contacto:*\n"
         "/sugerencia - Enviar una sugerencia o comentario\n\n"
         "*💡 ¿Cómo funciona?*\n"
-        "El bot verifica las tasas cada minuto. Cuando detecta un cambio, "
+        "El bot verifica las tasas cada 10 segundos. Cuando detecta un cambio, "
         "te notifica solo si cumple con tu configuración.\n\n"
         "*Ejemplo:*\n"
-        "Si elegis \"Cambio > 1%\" y la tasa pasa de 35% a 35.4% (+1.14%), "
-        "recibirás una alerta. Si cambia a 35.2% (+0.57%), no vas a recibir ninguna notificación.\n\n"
+        "Con un umbral de 30% y una variación de 1%, se avisa cuando la tasa 1D "
+        "alcanza 30%. Después, mientras siga en 30% o más, solo se avisa si varía al menos 1%.\n\n"
         "¿Necesitas ayuda? Envía /start para volver al menú principal"
     )
 
@@ -97,7 +97,11 @@ def mensaje_tasas(tasas: dict, mercado_cerrado: bool, cambios: dict = None) -> s
                 flecha = "📉"
                 signo = ""
             
-            mensaje += f" {flecha} {signo}{cambio['absolute']:.2f}%"
+            signo_relativo = "+" if cambio['percentage'] > 0 else ""
+            mensaje += (
+                f" {flecha} {signo}{cambio['absolute']:.2f} pp"
+                f" ({signo_relativo}{cambio['percentage']:.2f}% relativo)"
+            )
         
         mensaje += f'\n💰 Volumen: {volumen:,}'.replace(",", ".") + '\n'
         mensaje += "\n"
@@ -109,13 +113,17 @@ def mensaje_tasas(tasas: dict, mercado_cerrado: bool, cambios: dict = None) -> s
 
     return mensaje
 
-def bot_configurado(tipo: str, valor: float = 0.0) -> str:
+def bot_configurado(tipo: str, valor: float = 0.0, variacion: float = 0.0) -> str:
     if tipo == 'cualquier_cambio':
         descripcion = "Vas a recibir notificaciones cada vez que las tasas cambien."
         cierre = "Voy a avisarte cuando cambien."
     elif tipo == 'porcentaje':
-        descripcion = f"Vas a recibir notificaciones cuando las tasas cambien más de {valor}%"
-        cierre = f"Voy a avisarte cuando cambien más de {valor}%"
+        descripcion = (
+            f"Vas a recibir una notificación cuando la tasa 1D alcance {valor}%. "
+            f"Mientras permanezca en ese valor o por encima, te avisaré cuando "
+            f"varíe al menos {variacion}%."
+        )
+        cierre = f"Voy a controlar el umbral de {valor}% y las variaciones de {variacion}%"
     else:  # objetivo
         descripcion = f"Vas a recibir una notificación cuando la tasa 1D llegue a {valor}%"
         cierre = f"Voy a avisarte apenas la tasa 1D llegue a {valor}%"
@@ -127,7 +135,7 @@ def bot_configurado(tipo: str, valor: float = 0.0) -> str:
         f"• Usa /tasas para ver las tasas actuales\n"
         f"• Usa /estado para verificar tu configuración\n"
         f"• Usa /pausar si queres desactivar las alertas\n\n"
-        f"El bot está monitoreando las tasas cada minuto. {cierre}"
+        f"El bot está monitoreando las tasas cada 10 segundos. {cierre}"
     )
 
 def mensaje_notificacion_cambio(tasas: dict, cambios: dict) -> str:
@@ -157,7 +165,7 @@ def mensaje_configurar() -> str:
         "⚙️ *Configurar Notificaciones*\n\n"
         "Elegi cuándo queres recibir notificaciones:\n\n"
         "🔔 *Cualquier cambio* - Te aviso cada vez que las tasas varíen\n\n"
-        "📊 *Cambio porcentual* - Solo cuando el cambio supere el % que elijas\n\n"
+        "📊 *Umbral y variación 1D* - Al alcanzar una tasa mínima y luego ante variaciones relevantes\n\n"
         "🎯 *Valor objetivo* - Te aviso cuando la tasa 1D llegue al valor que elijas\n\n"
         "Selecciona una opción:"
     )
@@ -188,30 +196,52 @@ def prompt_sugerencia() -> str:
 def error_sugerencia_corta() -> str:
     return "❌ El mensaje es muy corto.\n\nPor favor escribí un mensaje más detallado:"
 
-def prompt_umbral_personalizado() -> str:
+def prompt_variacion_personalizada() -> str:
     return (
-        "⚙️ *Umbral Personalizado*\n\n"
-        "Envía un número con el porcentaje que deseas.\n\n"
+        "⚙️ *Variación porcentual*\n\n"
+        "Envía la variación relativa mínima necesaria para volver a notificar.\n\n"
         "📝 *Ejemplos:*\n"
-        "• `0.5` = Alertas cuando cambie más de 0.5%\n"
-        "• `1.5` = Alertas cuando cambie más de 1.5%\n"
-        "• `3` = Alertas cuando cambie más de 3%\n\n"
+        "• `0.5` = Avisar cuando varíe al menos 0.5%\n"
+        "• `1.5` = Avisar cuando varíe al menos 1.5%\n"
+        "• `3` = Avisar cuando varíe al menos 3%\n\n"
         "Envía tu número:"
     )
 
-def error_umbral_invalido() -> str:
+def error_variacion_invalida() -> str:
     return (
-        "❌ El porcentaje debe estar entre 0 y 100.\n\n"
+        "❌ La variación debe estar entre 0 y 100.\n\n"
         "💡 *Tip:* Si queres alertas frecuentes, usa 0.5 o 1.\n"
         "Si solo queres cambios importantes, usa 2 o 5.\n\n"
         "Intenta de nuevo:"
     )
 
-def error_umbral_no_numero() -> str:
+def error_variacion_no_numero() -> str:
     return (
         "❌ Por favor envia solo un número.\n\n"
         "📝 *Ejemplos válidos:*\n"
         "• 0.5\n• 1.5\n• 2\n• 5\n\n"
+        "Intenta de nuevo:"
+    )
+
+def prompt_umbral_tasa(variacion: float) -> str:
+    return (
+        "📊 *Tasa mínima 1D*\n\n"
+        f"Elegiste una variación de {variacion}%. Ahora envía la tasa 1D mínima "
+        "a partir de la cual queres recibir notificaciones.\n\n"
+        "📝 *Ejemplos:*\n"
+        "• `30` = Avisar cuando alcance 30%\n"
+        "• `35.5` = Avisar cuando alcance 35.5%\n\n"
+        "Envía tu número:"
+    )
+
+def error_umbral_tasa_invalido() -> str:
+    return "❌ La tasa mínima debe estar entre 0 y 200.\n\nIntenta de nuevo:"
+
+def error_umbral_tasa_no_numero() -> str:
+    return (
+        "❌ Por favor envia solo un número.\n\n"
+        "📝 *Ejemplos válidos:*\n"
+        "• 30\n• 35.5\n\n"
         "Intenta de nuevo:"
     )
 
@@ -256,7 +286,8 @@ def mensaje_stats(stats: dict, stats_subs: dict) -> str:
         f"🔔 Cualquier cambio: {stats_subs.get('usuarios_cualquier_cambio', 0)}\n"
         f"📊 Con umbral: {stats_subs.get('usuarios_porcentaje', 0)}\n"
         f"🎯 Con objetivo: {stats_subs.get('usuarios_objetivo', 0)}\n"
-        f"📈 Umbral promedio: {stats_subs.get('umbral_promedio', 0)}%\n\n"
+        f"📈 Tasa mínima promedio: {stats_subs.get('umbral_promedio', 0)}%\n"
+        f"📉 Variación promedio: {stats_subs.get('variacion_promedio', 0)}%\n\n"
         "🗄️ *Base de datos:* PostgreSQL\n"
         f"💾 Tamaño: {stats.get('tamanio_db', 'N/A')}\n"
         f"📝 Registros de tasas: {stats.get('rate_history_count', 'N/A')}\n"

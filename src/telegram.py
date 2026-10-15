@@ -47,8 +47,10 @@ class TipoSubscripcion(Enum):
 class Suscripcion:
     chat_id: int
     subscription_type: TipoSubscripcion
-    # % de cambio si es POR_PORCENTAJE, valor de tasa objetivo si es POR_OBJETIVO
+    # Tasa mínima si es POR_PORCENTAJE, valor objetivo si es POR_OBJETIVO.
     threshold_percentage: float = 0.0
+    # Variación porcentual relativa requerida para POR_PORCENTAJE.
+    percentage_variation: float = 0.0
 
 #----------------------------------------
 # Estado en memoria
@@ -83,7 +85,8 @@ def _cargar_suscripciones() -> dict[int, Suscripcion]:
         chat_id: Suscripcion(
             chat_id=fila['chat_id'],
             subscription_type=TipoSubscripcion(fila['subscription_type']),
-            threshold_percentage=fila['threshold_percentage'],
+            threshold_percentage=float(fila['threshold_percentage']),
+            percentage_variation=float(fila['percentage_variation']),
         )
         for chat_id, fila in crudo.items()
     }
@@ -92,7 +95,10 @@ def _texto_config_actual(suscripcion: Suscripcion) -> str:
     if suscripcion.subscription_type == TipoSubscripcion.CUALQUIER_CAMBIO:
         return "🔔 Notificaciones: Cualquier cambio"
     if suscripcion.subscription_type == TipoSubscripcion.POR_PORCENTAJE:
-        return f"📊 Notificaciones: Cambios > {suscripcion.threshold_percentage}%"
+        return (
+            f"📊 Notificaciones: tasa 1D ≥ {suscripcion.threshold_percentage}% "
+            f"y variación ≥ {suscripcion.percentage_variation}%"
+        )
     if suscripcion.subscription_type == TipoSubscripcion.POR_OBJETIVO:
         return f"🎯 Notificaciones: Cuando la tasa 1D llegue a {suscripcion.threshold_percentage}%"
     return "⏸️ Sin notificaciones activas"
@@ -108,14 +114,14 @@ def _teclado_configurar() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔔 Cualquier cambio", callback_data="config_cualquier_cambio")],
         [
-            InlineKeyboardButton("📊 Cambio > 0.5%", callback_data="config_porcentaje_0.5"),
-            InlineKeyboardButton("📊 Cambio > 1%", callback_data="config_porcentaje_1.0"),
+            InlineKeyboardButton("📊 Variación ≥ 0.5%", callback_data="config_porcentaje_0.5"),
+            InlineKeyboardButton("📊 Variación ≥ 1%", callback_data="config_porcentaje_1.0"),
         ],
         [
-            InlineKeyboardButton("📊 Cambio > 2%", callback_data="config_porcentaje_2.0"),
-            InlineKeyboardButton("📊 Cambio > 5%", callback_data="config_porcentaje_5.0"),
+            InlineKeyboardButton("📊 Variación ≥ 2%", callback_data="config_porcentaje_2.0"),
+            InlineKeyboardButton("📊 Variación ≥ 5%", callback_data="config_porcentaje_5.0"),
         ],
-        [InlineKeyboardButton("⚙️ Porcentaje personalizado", callback_data="config_porcentaje_custom")],
+        [InlineKeyboardButton("⚙️ Variación personalizada", callback_data="config_porcentaje_custom")],
         [InlineKeyboardButton("🎯 Cuando llegue a un valor", callback_data="config_objetivo_custom")],
     ])
 
@@ -133,10 +139,23 @@ def _se_debe_notificar(suscripcion: Suscripcion, cambios: dict) -> bool:
         return any(cambios[periodo]['changed'] for periodo in cambios)
 
     if suscripcion.subscription_type == TipoSubscripcion.POR_PORCENTAJE:
-        return any(
-            cambios[periodo]['changed'] and abs(cambios[periodo]['absolute']) >= suscripcion.threshold_percentage
-            for periodo in cambios
+        info = cambios.get('1d')
+        if not info or not info.get('changed') or 'old' not in info or 'new' not in info:
+            return False
+
+        anterior = float(info['old'])
+        nuevo = float(info['new'])
+        umbral = suscripcion.threshold_percentage
+        variacion = abs(float(info.get('percentage', 0)))
+
+        cruzo_umbral = anterior < umbral <= nuevo
+        vario_sobre_umbral = (
+            anterior >= umbral
+            and nuevo >= umbral
+            and variacion >= suscripcion.percentage_variation
         )
+
+        return cruzo_umbral or vario_sobre_umbral
 
     if suscripcion.subscription_type == TipoSubscripcion.POR_OBJETIVO:
         objetivo = suscripcion.threshold_percentage
@@ -180,6 +199,13 @@ async def _boton_tasas(update: Update, _context: ContextTypes.DEFAULT_TYPE):
 async def _boton_configurar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /configurar - Mostrar opciones de configuración"""
     _log_botones("configurar", update.effective_chat.id)
+    for clave in (
+        'esperando_variacion_porcentaje',
+        'esperando_umbral_tasa',
+        'esperando_valor_objetivo',
+        'percentage_variation',
+    ):
+        context.user_data.pop(clave, None)
     await update.message.reply_text(
         templates.mensaje_configurar(),
         reply_markup=_teclado_configurar(),
@@ -348,6 +374,7 @@ async def _callback_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "config_cualquier_cambio":
+        context.user_data.clear()
         suscripcion = Suscripcion(chat_id=chat_id, subscription_type=TipoSubscripcion.CUALQUIER_CAMBIO)
         suscripciones[chat_id] = suscripcion
         await database.set_suscripcion(suscripcion)
@@ -356,51 +383,81 @@ async def _callback_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data.startswith("config_porcentaje_") and data != "config_porcentaje_custom":
-        porcentaje = float(data.replace("config_porcentaje_", ""))
-        suscripcion = Suscripcion(
-            chat_id=chat_id,
-            subscription_type=TipoSubscripcion.POR_PORCENTAJE,
-            threshold_percentage=porcentaje
+        variacion = float(data.replace("config_porcentaje_", ""))
+        context.user_data.pop('esperando_variacion_porcentaje', None)
+        context.user_data.pop('esperando_valor_objetivo', None)
+        context.user_data['percentage_variation'] = variacion
+        context.user_data['esperando_umbral_tasa'] = True
+        await query.edit_message_text(
+            templates.prompt_umbral_tasa(variacion),
+            parse_mode='Markdown'
         )
-        suscripciones[chat_id] = suscripcion
-        await database.set_suscripcion(suscripcion)
-        await query.edit_message_text(templates.bot_configurado('porcentaje', porcentaje), parse_mode='Markdown')
-        logger.info(f"[CONFIG] user={chat_id} | tipo=porcentaje | umbral={porcentaje}%")
         return
 
     if data == "config_porcentaje_custom":
-        await query.edit_message_text(templates.prompt_umbral_personalizado(), parse_mode='Markdown')
-        context.user_data['esperando_umbral_porcentaje'] = True
+        context.user_data.pop('esperando_umbral_tasa', None)
+        context.user_data.pop('esperando_valor_objetivo', None)
+        context.user_data.pop('percentage_variation', None)
+        await query.edit_message_text(templates.prompt_variacion_personalizada(), parse_mode='Markdown')
+        context.user_data['esperando_variacion_porcentaje'] = True
         return
 
     if data == "config_objetivo_custom":
+        context.user_data.pop('esperando_variacion_porcentaje', None)
+        context.user_data.pop('esperando_umbral_tasa', None)
+        context.user_data.pop('percentage_variation', None)
         await query.edit_message_text(templates.prompt_valor_objetivo(), parse_mode='Markdown')
         context.user_data['esperando_valor_objetivo'] = True
         return
 
-async def _procesar_umbral_porcentaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def _procesar_variacion_porcentaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        porcentaje = float(update.message.text.strip().replace(',', '.'))
+        variacion = float(update.message.text.strip().replace(',', '.'))
 
-        if porcentaje < 0 or porcentaje > 100:
-            await update.message.reply_text(templates.error_umbral_invalido(), parse_mode='Markdown')
+        if variacion < 0 or variacion > 100:
+            await update.message.reply_text(templates.error_variacion_invalida(), parse_mode='Markdown')
             return
 
+        context.user_data['percentage_variation'] = variacion
+        context.user_data['esperando_variacion_porcentaje'] = False
+        context.user_data['esperando_umbral_tasa'] = True
+        await update.message.reply_text(templates.prompt_umbral_tasa(variacion), parse_mode='Markdown')
+
+    except ValueError:
+        await update.message.reply_text(templates.error_variacion_no_numero(), parse_mode='Markdown')
+
+async def _procesar_umbral_tasa(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        umbral = float(update.message.text.strip().replace(',', '.'))
+
+        if umbral < 0 or umbral > 200:
+            await update.message.reply_text(templates.error_umbral_tasa_invalido(), parse_mode='Markdown')
+            return
+
+        variacion = float(context.user_data.get('percentage_variation', 0))
         chat_id = update.effective_chat.id
         suscripcion = Suscripcion(
             chat_id=chat_id,
             subscription_type=TipoSubscripcion.POR_PORCENTAJE,
-            threshold_percentage=porcentaje
+            threshold_percentage=umbral,
+            percentage_variation=variacion,
         )
         suscripciones[chat_id] = suscripcion
         await database.set_suscripcion(suscripcion)
 
-        await update.message.reply_text(templates.bot_configurado('porcentaje', porcentaje), parse_mode='Markdown')
-        context.user_data['esperando_umbral_porcentaje'] = False
-        logger.info(f"[CONFIG] user={chat_id} | tipo=personalizado | umbral={porcentaje}%")
+        await update.message.reply_text(
+            templates.bot_configurado('porcentaje', umbral, variacion),
+            parse_mode='Markdown'
+        )
+        context.user_data['esperando_umbral_tasa'] = False
+        context.user_data.pop('percentage_variation', None)
+        logger.info(
+            f"[CONFIG] user={chat_id} | tipo=porcentaje | "
+            f"umbral={umbral}% | variacion={variacion}%"
+        )
 
     except ValueError:
-        await update.message.reply_text(templates.error_umbral_no_numero(), parse_mode='Markdown')
+        await update.message.reply_text(templates.error_umbral_tasa_no_numero(), parse_mode='Markdown')
 
 async def _procesar_valor_objetivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -441,8 +498,10 @@ async def _procesar_sugerencia(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def _manejar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Manejar mensajes de texto (umbral/objetivo personalizado, sugerencias o mensajes no reconocidos)"""
-    if context.user_data.get('esperando_umbral_porcentaje'):
-        await _procesar_umbral_porcentaje(update, context)
+    if context.user_data.get('esperando_variacion_porcentaje'):
+        await _procesar_variacion_porcentaje(update, context)
+    elif context.user_data.get('esperando_umbral_tasa'):
+        await _procesar_umbral_tasa(update, context)
     elif context.user_data.get('esperando_valor_objetivo'):
         await _procesar_valor_objetivo(update, context)
     elif context.user_data.get('esperando_sugerencia'):
@@ -461,7 +520,7 @@ async def _verificar_tasas_y_notificar(context: ContextTypes.DEFAULT_TYPE):
     nuevas_tasas = get_tasas_caucion()
 
     if not nuevas_tasas:
-        logger.error("[TASAS] Error obteniendo tasas de PPI")
+        logger.error("[TASAS] Error obteniendo tasas")
         estadisticas_sesion['errores_api'] += 1
         return
 
@@ -549,7 +608,8 @@ async def _post_init(application: Application):
 
     if application.job_queue:
         # Job de verificación de tasas (cada 60 segundos)
-        application.job_queue.run_repeating(_verificar_tasas_y_notificar, interval=60, first=10)
+        UPDATE_INTERVAL = int(getenv('UPDATE_INTERVAL', 60))
+        application.job_queue.run_repeating(_verificar_tasas_y_notificar, interval=UPDATE_INTERVAL, first=10)
 
         # Job de status (cada 15 minutos)
         application.job_queue.run_repeating(_job_estado_log, interval=900, first=60)
@@ -557,8 +617,8 @@ async def _post_init(application: Application):
         # Job diario al cierre del mercado
         hora_cierre = CIERRE_MERVAL.replace(tzinfo=HUSO_HORARIO_ARG)
         application.job_queue.run_daily(_job_tasas_cierre, time=hora_cierre, days=(0, 1, 2, 3, 4))
-
-        logger.info("[JOBS] Configurados: tasas(60s), status(15m), cierre")
+        update_interval = int(getenv('UPDATE_INTERVAL', 60))
+        logger.info(f"[JOBS] Configurados: tasas({update_interval}s), status(15m), cierre")
     else:
         logger.warning("JobQueue no disponible - las notificaciones automáticas no funcionarán")
 
