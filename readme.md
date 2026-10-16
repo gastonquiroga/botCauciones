@@ -1,6 +1,6 @@
 # Bot de Cauciones
 
-> Bot de Telegram (con publicación automática en X/Twitter) para monitorear tasas de cauciones en tiempo real desde PPI.
+> Bot de Telegram para monitorear tasas de cauciones en tiempo real desde PPI.
 
 [![Telegram Bot](https://img.shields.io/badge/Telegram-Bot-blue?logo=telegram)](https://t.me/caucho_bot)
 [![Python](https://img.shields.io/badge/Python-3.9+-green?logo=python)](https://python.org)
@@ -8,13 +8,12 @@
 
 ## ¿Qué hace este bot?
 
-Consulta las **tasas de cauciones** (1D, 2D, 3D y 7D) y su **volumen operado** directamente desde la API de PPI, te permite configurar **alertas personalizadas** para recibir notificaciones cuando las tasas cambien, y publica automáticamente en X/Twitter ante subas relevantes.
+Consulta las **tasas de cauciones** (1D, 2D, 3D y 7D) y su **volumen operado** directamente desde la API de PPI, y permite configurar **alertas personalizadas** para recibir notificaciones cuando las tasas cambien.
 
 ### Características principales
 
 - 📊 **Tasas en tiempo real** - Consulta tasas y volumen de 1, 2, 3 y 7 días desde PPI
 - 🔔 **Alertas inteligentes** - Cualquier cambio, tasa mínima con variación porcentual o valor objetivo
-- 🐦 **Publicación en X/Twitter** - Tuitea automáticamente cuando una tasa sube ≥ 5 puntos porcentuales
 - 🕐 **Horario de mercado** - Respeta el horario del mercado argentino (Lun-Vie 10:30-17:00)
 - 🇦🇷 **Timezone Argentina** - Todas las fechas en hora de Buenos Aires
 - 💾 **Persistencia PostgreSQL** - Tasas, suscripciones y sugerencias en base de datos
@@ -100,10 +99,6 @@ Verificar la conexión a la base de datos
 ### `/broadcast <mensaje>` (Solo admin)
 Enviar un mensaje a todos los suscriptores activos
 
-## 🐦 Publicación automática en X/Twitter
-
-Cuando una tasa sube 5 puntos porcentuales o más en una sola verificación, el bot publica automáticamente un tweet con el resumen de tasas usando Selenium (con perfil de Chrome persistente para mantener la sesión logueada). Se activa con `TWITTER_ENABLED=true`.
-
 ## 🚀 Instalación
 
 ### Requisitos
@@ -111,7 +106,6 @@ Cuando una tasa sube 5 puntos porcentuales o más en una sola verificación, el 
 - PostgreSQL
 - Cuenta PPI con acceso API
 - Bot de Telegram (crear con @BotFather)
-- (Opcional) Chrome/Chromium con sesión de X/Twitter iniciada, para la publicación automática
 
 ### Pasos
 
@@ -155,9 +149,6 @@ DB_NAME_TEST=cauciones_test                       # usado si TEST=true
 TEST=false
 UPDATE_INTERVAL=60                              # segundos entre consultas de tasas
 
-# X/Twitter (opcional)
-TWITTER_ENABLED=false
-CHROME_PROFILE_PATH=chrome_profile                 # perfil de Chrome con sesión iniciada
 ```
 
 4. **Ejecutar:**
@@ -167,13 +158,13 @@ python main.py
 
 ### Con Docker
 
-El proyecto incluye `Dockerfile` y `compose.yaml` (imagen con Chromium + Xvfb para soportar la publicación en Twitter):
+El proyecto incluye `Dockerfile` y `compose.yaml` para ejecutar el bot en Docker:
 
 ```bash
 docker compose up -d --build
 ```
 
-El contenedor usa `network_mode: host` para acceder a PostgreSQL en otro servidor, y monta `./chrome_profile` como volumen para persistir la sesión de Twitter entre reinicios.
+El contenedor usa `network_mode: host` para acceder a PostgreSQL en otro servidor.
 
 ## ⚙️ Configuración Avanzada
 
@@ -200,14 +191,6 @@ En `src/bot.py`, función `calcular_cambios_en_tasas`:
 
 ```python
 'changed': abs(variacion_absoluta) > 0.001  # Tolerancia para floats
-```
-
-### Umbral de publicación en Twitter
-
-En `src/twitter.py`:
-
-```python
-UMBRAL_TWEET = 5.0  # Puntos porcentuales absolutos
 ```
 
 ## 📄 Licencia

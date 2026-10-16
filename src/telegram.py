@@ -9,13 +9,11 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 try:
     from .bot import mercado_abierto, calcular_cambios_en_tasas, get_tasas_caucion
     from . import database
-    from . import twitter
     from .config import configurar_logging, HUSO_HORARIO_ARG, CIERRE_MERVAL, MODO_TEST
     from . import templates
 except ImportError:
     from bot import mercado_abierto, calcular_cambios_en_tasas, get_tasas_caucion
     import database
-    import twitter
     from config import configurar_logging, HUSO_HORARIO_ARG, CIERRE_MERVAL, MODO_TEST
     import templates
 
@@ -29,7 +27,6 @@ else:
     telegram_token = getenv('TELEGRAM_BOT_TOKEN')
 
 admin_chat_id = int(getenv("ADMIN_CHAT_ID", "0"))
-twitter_habilitado = getenv("TWITTER_ENABLED", "false").lower() == "true"
 
 logger = configurar_logging()
 
@@ -540,13 +537,6 @@ async def _verificar_tasas_y_notificar(context: ContextTypes.DEFAULT_TYPE):
         return
 
     estadisticas_sesion['cambios_detectados'] += 1
-
-    if twitter_habilitado and twitter.debe_tuitear(cambios):
-        try:
-            texto_tweet = templates.mensaje_tweet(nuevas_tasas, cambios)
-            twitter.tuitear(texto_tweet)
-        except Exception as e:
-            logger.error(f"[TWITTER] Error en publicación: {e}")
 
     notificados = 0
     for chat_id, suscripcion in list(suscripciones.items()):

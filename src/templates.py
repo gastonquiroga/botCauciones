@@ -141,25 +141,6 @@ def bot_configurado(tipo: str, valor: float = 0.0, variacion: float = 0.0) -> st
 def mensaje_notificacion_cambio(tasas: dict, cambios: dict) -> str:
     return "🔔 *¡Cambio en las tasas!*\n\n" + mensaje_tasas(tasas, mercado_cerrado=False, cambios=cambios)
 
-def mensaje_tweet(tasas: dict, cambios: dict) -> str:
-    """Formatear mensaje para Twitter (plain-text, sin markdown, tope de 150 caracteres)"""
-    partes = []
-
-    for periodo in ['1d', '2d', '3d', '7d']:
-        texto = f"{periodo.upper()}: {tasas[periodo]:.2f}%"
-
-        if cambios and periodo in cambios and cambios[periodo]['changed']:
-            cambio = cambios[periodo]
-            flecha = "📈" if cambio['absolute'] > 0 else "📉"
-            signo = "+" if cambio['absolute'] > 0 else ""
-            texto += f" {flecha}{signo}{cambio['absolute']:.2f}%"
-
-        partes.append(texto)
-
-    hora = tasas['timestamp'].split(' ')[1][:5]
-
-    return "🔔 Cauciones\n\n" + "\n".join(partes) + f"\n\n🕒 {hora}hs"
-
 def mensaje_configurar() -> str:
     return (
         "⚙️ *Configurar Notificaciones*\n\n"
